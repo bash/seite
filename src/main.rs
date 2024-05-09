@@ -15,7 +15,7 @@ struct Args {
     template: Option<String>,
     /// Output file to write to. Defaults to <base_name(FILE)>.html.
     /// Use `-` to write to stdout instead.
-    #[arg(short = 'O', long, value_parser = path_is_file_or_std_stream)]
+    #[arg(short = 'O', long)]
     output: Option<String>,
     /// Explicitly set the title of the page.
     /// If not provided, the title will be extracted from the markdown file.
