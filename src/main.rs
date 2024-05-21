@@ -3,6 +3,7 @@ use clap::Parser;
 use itertools::Itertools as _;
 use std::io::Read as _;
 use std::path::Path;
+use std::str::FromStr;
 use std::{fs, io};
 
 #[derive(Debug, Parser)]
@@ -21,6 +22,20 @@ struct Args {
     /// If not provided, the title will be extracted from the markdown file.
     #[arg(long)]
     title: Option<String>,
+    /// Additional JSON metadata passed directly to the template.
+    #[arg(long)]
+    metadata: Option<Json>,
+}
+
+#[derive(Debug, Clone)]
+struct Json(tera::Value);
+
+impl FromStr for Json {
+    type Err = <tera::Value as FromStr>::Err;
+
+    fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
+        tera::Value::from_str(s).map(Json)
+    }
 }
 
 fn main() -> Result<()> {
@@ -32,7 +47,7 @@ fn main() -> Result<()> {
     let body_html = markdown_to_html(&markdown);
     let html = args
         .template
-        .map(|f| render_template(title.as_deref(), &body_html, &f))
+        .map(|f| render_template(title.as_deref(), args.metadata, &body_html, &f))
         .unwrap_or(Ok(body_html))?;
     write_output(&output_file_name(&args.file, args.output), &html)?;
     Ok(())
@@ -45,13 +60,19 @@ fn markdown_to_html(markdown: &str) -> String {
     html
 }
 
-fn render_template(title: Option<&str>, content: &str, template_file: &str) -> Result<String> {
+fn render_template(
+    title: Option<&str>,
+    metadata: Option<Json>,
+    content: &str,
+    template_file: &str,
+) -> Result<String> {
     const TEMPLATE_NAME: &str = "template";
     let mut tera = tera::Tera::default();
     tera.add_raw_template(TEMPLATE_NAME, &fs::read_to_string(template_file)?)?;
     let mut context = tera::Context::new();
     context.insert("title", &title);
     context.insert("content", content);
+    context.insert("metadata", &metadata.map(|m| m.0));
     Ok(tera.render(TEMPLATE_NAME, &context)?)
 }
 
