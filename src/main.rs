@@ -156,6 +156,7 @@ fn create_markdown_parser(markdown: &str) -> pulldown_cmark::Parser {
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
-        | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS;
+        | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS
+        | Options::ENABLE_MATH;
     Parser::new_ext(markdown, options)
 }
