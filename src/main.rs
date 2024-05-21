@@ -45,9 +45,10 @@ fn main() -> Result<()> {
         .title
         .or_else(|| extract_page_title(&markdown).map(to_plain_text));
     let body_html = markdown_to_html(&markdown);
+    let math = has_math(&markdown);
     let html = args
         .template
-        .map(|f| render_template(title.as_deref(), args.metadata, &body_html, &f))
+        .map(|f| render_template(title.as_deref(), args.metadata, math, &body_html, &f))
         .unwrap_or(Ok(body_html))?;
     write_output(&output_file_name(&args.file, args.output), &html)?;
     Ok(())
@@ -63,6 +64,7 @@ fn markdown_to_html(markdown: &str) -> String {
 fn render_template(
     title: Option<&str>,
     metadata: Option<Json>,
+    math: bool,
     content: &str,
     template_file: &str,
 ) -> Result<String> {
@@ -73,6 +75,7 @@ fn render_template(
     context.insert("title", &title);
     context.insert("content", content);
     context.insert("metadata", &metadata.map(|m| m.0));
+    context.insert("math", &math);
     Ok(tera.render(TEMPLATE_NAME, &context)?)
 }
 
@@ -135,6 +138,11 @@ fn extract_page_title(markdown: &str) -> Option<impl Iterator<Item = pulldown_cm
             _ => return None,
         }
     }
+}
+
+fn has_math(markdown: &str) -> bool {
+    use pulldown_cmark::Event::*;
+    create_markdown_parser(markdown).any(|e| matches!(e, InlineMath(..) | DisplayMath(..)))
 }
 
 fn to_plain_text<'a>(events: impl Iterator<Item = pulldown_cmark::Event<'a>>) -> String {
