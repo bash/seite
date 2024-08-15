@@ -1,10 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
 use itertools::Itertools as _;
+use preprocess::preprocess;
 use std::io::Read as _;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
+
+mod preprocess;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -41,23 +44,33 @@ impl FromStr for Json {
 fn main() -> Result<()> {
     let args = Args::parse();
     let markdown = read_input(&args.file)?;
-    let title = args
-        .title
-        .or_else(|| extract_page_title(&markdown).map(to_plain_text));
-    let body_html = markdown_to_html(&markdown);
-    let math = has_math(&markdown);
+
+    let preprocessed = preprocess(create_markdown_parser(&markdown));
+    let title = args.title.or_else(|| {
+        preprocessed
+            .title_events
+            .map(|events| to_plain_text(events.into_iter()))
+    });
+    let body_html = to_html(preprocessed.events.into_iter());
     let html = args
         .template
-        .map(|f| render_template(title.as_deref(), args.metadata, math, &body_html, &f))
+        .map(|f| {
+            render_template(
+                title.as_deref(),
+                args.metadata,
+                preprocessed.has_math,
+                &body_html,
+                &f,
+            )
+        })
         .unwrap_or(Ok(body_html))?;
     write_output(&output_file_name(&args.file, args.output), &html)?;
     Ok(())
 }
 
-fn markdown_to_html(markdown: &str) -> String {
-    let parser = create_markdown_parser(markdown);
+fn to_html<'a>(events: impl Iterator<Item = pulldown_cmark::Event<'a>>) -> String {
     let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, parser);
+    pulldown_cmark::html::push_html(&mut html, events);
     html
 }
 
@@ -121,28 +134,6 @@ fn read_input(path: &str) -> io::Result<String> {
     } else {
         fs::read_to_string(path)
     }
-}
-
-fn extract_page_title(markdown: &str) -> Option<impl Iterator<Item = pulldown_cmark::Event>> {
-    use pulldown_cmark::{Event, HeadingLevel::*, Tag, TagEnd};
-    let mut parser = create_markdown_parser(markdown);
-
-    loop {
-        match parser.next()? {
-            Event::Start(Tag::Heading { level: H1, .. }) => {
-                return Some(parser.take_while(|e| !matches!(e, Event::End(TagEnd::Heading(H1)))))
-            }
-            Event::Start(Tag::MetadataBlock(_)) => {
-                while !matches!(parser.next()?, Event::End(TagEnd::MetadataBlock(_))) {}
-            }
-            _ => return None,
-        }
-    }
-}
-
-fn has_math(markdown: &str) -> bool {
-    use pulldown_cmark::Event::*;
-    create_markdown_parser(markdown).any(|e| matches!(e, InlineMath(..) | DisplayMath(..)))
 }
 
 fn to_plain_text<'a>(events: impl Iterator<Item = pulldown_cmark::Event<'a>>) -> String {
