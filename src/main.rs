@@ -111,7 +111,7 @@ fn write_output(output_file: &str, content: &str) -> Result<()> {
 }
 
 fn path_is_file(path: &str) -> Result<String, String> {
-    if Path::new(path).is_file() {
+    if Path::new(path).exists() {
         Ok(path.to_owned())
     } else {
         Err(format!("'{path}' does not exist or is not a file."))
