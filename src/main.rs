@@ -15,8 +15,9 @@ struct Args {
     #[arg(value_parser = path_is_file_or_std_stream)]
     file: String,
     /// An optional tera template to use for rendering.
+    /// Additional values are added to the tera context for inheritance.
     #[arg(short = 'T', long, value_parser = path_is_file)]
-    template: Option<String>,
+    template: Vec<String>,
     /// Output file to write to. Defaults to <base_name(FILE)>.html.
     /// Use `-` to write to stdout instead.
     #[arg(short = 'O', long)]
@@ -52,18 +53,14 @@ fn main() -> Result<()> {
             .map(|events| to_plain_text(events.into_iter()))
     });
     let body_html = to_html(preprocessed.events.into_iter());
-    let html = args
-        .template
-        .map(|f| {
-            render_template(
-                title.as_deref(),
-                args.metadata,
-                preprocessed.has_math,
-                &body_html,
-                &f,
-            )
-        })
-        .unwrap_or(Ok(body_html))?;
+    let html = render_template(
+        title.as_deref(),
+        args.metadata,
+        preprocessed.has_math,
+        &body_html,
+        &args.template,
+    )?
+    .unwrap_or(body_html);
     write_output(&output_file_name(&args.file, args.output), &html)?;
     Ok(())
 }
@@ -79,17 +76,21 @@ fn render_template(
     metadata: Option<Json>,
     math: bool,
     content: &str,
-    template_file: &str,
-) -> Result<String> {
-    const TEMPLATE_NAME: &str = "template";
+    template_files: &[String],
+) -> Result<Option<String>> {
     let mut tera = tera::Tera::default();
-    tera.add_raw_template(TEMPLATE_NAME, &fs::read_to_string(template_file)?)?;
+    tera.add_template_files(template_files.iter().map(|f| (f, None::<&str>)))?;
     let mut context = tera::Context::new();
     context.insert("title", &title);
     context.insert("content", content);
     context.insert("metadata", &metadata.map(|m| m.0));
     context.insert("math", &math);
-    Ok(tera.render(TEMPLATE_NAME, &context)?)
+
+    if let Some(template) = template_files.first() {
+        Ok(Some(tera.render(template, &context)?))
+    } else {
+        Ok(None)
+    }
 }
 
 fn output_file_name(input_file: &str, output_file: Option<String>) -> String {
