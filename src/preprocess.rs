@@ -1,7 +1,9 @@
+use anyhow::{Context, Result};
 use pulldown_cmark::{
     CowStr,
     Event::{self, *},
     HeadingLevel::*,
+    MetadataBlockKind,
     Tag::*,
     TagEnd,
 };
@@ -11,14 +13,18 @@ pub(crate) struct PreprocessedMarkdown<'a> {
     pub(crate) events: Vec<Event<'a>>,
     pub(crate) title_events: Option<Vec<Event<'a>>>,
     pub(crate) has_math: bool,
+    pub(crate) metadata: Option<json::Value>,
 }
 
-pub(crate) fn preprocess<'a>(parser: impl Iterator<Item = Event<'a>>) -> PreprocessedMarkdown<'a> {
+pub(crate) fn preprocess<'a>(
+    parser: impl Iterator<Item = Event<'a>>,
+) -> Result<PreprocessedMarkdown<'a>> {
     let mut events = Vec::new();
     let mut title_events = None;
     let mut footnote_definitions = Vec::new();
     let mut has_math = false;
     let mut numbers = HashMap::new();
+    let mut metadata = None;
 
     let mut state = State::default();
     for event in parser {
@@ -39,6 +45,9 @@ pub(crate) fn preprocess<'a>(parser: impl Iterator<Item = Event<'a>>) -> Preproc
             }
             (State::Default, Start(FootnoteDefinition(label))) => {
                 State::FootnoteDefinition(label.clone(), vec![event])
+            }
+            (State::Default, Start(MetadataBlock(MetadataBlockKind::PlusesStyle))) => {
+                State::TomlMetadata(String::new())
             }
             (state @ State::Default, _) => {
                 events.push(event);
@@ -64,6 +73,20 @@ pub(crate) fn preprocess<'a>(parser: impl Iterator<Item = Event<'a>>) -> Preproc
                 events.push(event);
                 State::FootnoteDefinition(label, events)
             }
+            (
+                State::TomlMetadata(metadata_str),
+                End(TagEnd::MetadataBlock(MetadataBlockKind::PlusesStyle)),
+            ) => {
+                let deserialized =
+                    toml::from_str(&metadata_str).context("failed to parse frontmatter")?;
+                metadata = Some(deserialized);
+                State::Default
+            }
+            (State::TomlMetadata(mut metadata), Text(text)) => {
+                metadata.push_str(text);
+                State::TomlMetadata(metadata)
+            }
+            (State::TomlMetadata(metadata), _event) => State::TomlMetadata(metadata),
         };
     }
 
@@ -74,11 +97,12 @@ pub(crate) fn preprocess<'a>(parser: impl Iterator<Item = Event<'a>>) -> Preproc
             .flat_map(|(_, events)| events),
     );
 
-    PreprocessedMarkdown {
+    Ok(PreprocessedMarkdown {
         events,
         title_events,
         has_math,
-    }
+        metadata,
+    })
 }
 
 #[derive(Default, Clone)]
@@ -87,4 +111,5 @@ enum State<'a> {
     Default,
     Title,
     FootnoteDefinition(CowStr<'a>, Vec<Event<'a>>),
+    TomlMetadata(String),
 }

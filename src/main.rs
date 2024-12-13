@@ -26,19 +26,21 @@ struct Args {
     /// If not provided, the title will be extracted from the markdown file.
     #[arg(long)]
     title: Option<String>,
-    /// Additional JSON metadata passed directly to the template.
+    /// Additional JSON metadata that is merged together with the
+    /// metadata from the frontmatter. Passed directly to the template via the
+    /// `metadata` variable.
     #[arg(long)]
     metadata: Option<Json>,
 }
 
 #[derive(Debug, Clone)]
-struct Json(tera::Value);
+struct Json(json::Value);
 
 impl FromStr for Json {
-    type Err = <tera::Value as FromStr>::Err;
+    type Err = <json::Value as FromStr>::Err;
 
     fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
-        tera::Value::from_str(s).map(Json)
+        json::Value::from_str(s).map(Json)
     }
 }
 
@@ -46,7 +48,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let markdown = read_input(&args.file)?;
 
-    let preprocessed = preprocess(create_markdown_parser(&markdown));
+    let preprocessed = preprocess(create_markdown_parser(&markdown))?;
     let title = args.title.or_else(|| {
         preprocessed
             .title_events
@@ -57,6 +59,7 @@ fn main() -> Result<()> {
         title.as_deref(),
         args.metadata,
         preprocessed.has_math,
+        &preprocessed.metadata,
         &body_html,
         &args.template,
     )?
@@ -75,6 +78,7 @@ fn render_template(
     title: Option<&str>,
     metadata: Option<Json>,
     math: bool,
+    frontmatter: &Option<json::Value>,
     content: &str,
     template_files: &[String],
 ) -> Result<Option<String>> {
@@ -84,6 +88,9 @@ fn render_template(
     context.insert("title", &title);
     context.insert("content", content);
     context.insert("metadata", &metadata.map(|m| m.0));
+    if let Some(frontmatter) = frontmatter {
+        context.insert("frontmatter", &frontmatter);
+    }
     context.insert("math", &math);
 
     if let Some(template) = template_files.first() {
