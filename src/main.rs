@@ -7,6 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{fs, io};
 
+mod highlight;
 mod preprocess;
 
 #[derive(Debug, Parser)]
@@ -31,6 +32,16 @@ struct Args {
     /// `metadata` variable.
     #[arg(long)]
     metadata: Option<Json>,
+    /// Optional command to used to highlight code blocks.
+    ///
+    /// Any {} placeholder is replaced with the language name.
+    /// The command is split according to shell splitting rules of the UNIX shell.
+    /// Code is passed via stdin and HTML is expected on stdout.
+    ///
+    /// Example:
+    /// pygmentize -f html -O cssclass=syntax -l {}
+    #[arg(long)]
+    highlight_command: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +59,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let markdown = read_input(&args.file)?;
 
-    let preprocessed = preprocess(create_markdown_parser(&markdown))?;
+    let preprocessed = preprocess(create_markdown_parser(&markdown), args.highlight_command)?;
     let title = args.title.or_else(|| {
         preprocessed
             .title_events
@@ -59,6 +70,7 @@ fn main() -> Result<()> {
         title.as_deref(),
         args.metadata,
         preprocessed.has_math,
+        preprocessed.has_highlighted_code,
         &preprocessed.metadata,
         &body_html,
         &args.template,
@@ -78,6 +90,7 @@ fn render_template(
     title: Option<&str>,
     metadata: Option<Json>,
     math: bool,
+    has_highlighted_code: bool,
     frontmatter: &Option<json::Value>,
     content: &str,
     template_files: &[String],
@@ -92,6 +105,7 @@ fn render_template(
         context.insert("frontmatter", &frontmatter);
     }
     context.insert("math", &math);
+    context.insert("has_highlighted_code", &has_highlighted_code);
 
     if let Some(template) = template_files.first() {
         Ok(Some(tera.render(template, &context)?))
